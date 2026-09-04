@@ -1,0 +1,43 @@
+name: build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pyinstaller
+      - name: Tesseract 다운로드 (한국어 포함)
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          $t = "C:\Program Files\Tesseract-OCR"
+          New-Item -ItemType Directory -Force tesseract\tessdata | Out-Null
+          Copy-Item "$t\*.dll" tesseract\
+          Copy-Item "$t\tesseract.exe" tesseract\
+          Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/kor.traineddata -OutFile tesseract\tessdata\kor.traineddata
+          Invoke-WebRequest https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata -OutFile tesseract\tessdata\eng.traineddata
+      - run: pyinstaller --noconfirm --windowed --onefile --name "PDF개인정보삭제기" --add-data "tesseract;tesseract" --add-data "ui;ui" app_web.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDF개인정보삭제기-windows
+          path: dist/PDF개인정보삭제기.exe
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pyinstaller
+      - run: pyinstaller --noconfirm --windowed --name "PDF개인정보삭제기" --add-data "ui:ui" app_web.py
+      - run: cd dist && zip -r "PDF개인정보삭제기-mac.zip" "PDF개인정보삭제기.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDF개인정보삭제기-mac
+          path: dist/PDF개인정보삭제기-mac.zip
