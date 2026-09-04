@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"><title>PDF개인정보삭제기</title>
+<style>
+*{box-sizing:border-box;user-select:none}
+html,body{height:100%;margin:0}
+body{font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;color:#1a1a1a;
+ background:linear-gradient(135deg,#dcd3ef 0%,#f6f3ec 45%,#f8ec9f 100%);background-attachment:fixed;
+ display:flex;flex-direction:column;padding:14px 26px 20px;gap:14px;min-height:100%}
+button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+button:focus-visible,.chip:focus-visible{outline:2px solid #111;outline-offset:2px}
+
+/* 상단 */
+header{display:flex;align-items:center}
+.logo{font-weight:900;font-size:24px;line-height:.9;letter-spacing:-1px}
+.logo small{display:block;font-weight:500;font-size:10px;letter-spacing:0;color:#666;margin-top:6px}
+.pills{margin-left:auto;display:flex;gap:6px;background:#fff;padding:7px;border-radius:40px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.pill{border-radius:30px;padding:9px 16px;font-size:14px;display:flex;align-items:center;gap:7px;color:#333}
+.pill:hover{background:#f1ede3}.pill.dark{background:#111;color:#fff}.pill.dark:hover{background:#000}
+.n{background:#f6c634;color:#111;font-size:11px;font-weight:700;border-radius:12px;padding:2px 7px}
+
+/* 카드 */
+.card{background:#fffdf8;border-radius:22px;padding:22px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+.drop{border:2.5px dashed #cfc7b8;border-radius:18px;background:#fbf9f3;text-align:center;color:#777;
+ display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:14px;height:190px;cursor:pointer;transition:background .15s,border-color .15s}
+.drop:hover,.drop.over{background:#fdf6d6;border-color:#f6c634}
+.drop .ic{font-size:32px}.drop .t{font-size:18px;font-weight:600;color:#333}
+.drop .sub b{color:#111}
+.chips{display:flex;align-items:center;gap:8px;margin-top:18px;flex-wrap:wrap}
+.chips .lbl{font-size:13px;color:#666;margin-right:4px}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1.5px solid #ddd;border-radius:30px;padding:8px 16px;font-size:14px;background:#faf8f2;cursor:pointer}
+.chip i{width:8px;height:8px;border-radius:50%;background:#bbb}.chip.on{border-color:#111}.chip.on i{background:#f6c634}
+.chip.ml{margin-left:auto}
+.bottom{display:flex;align-items:center;gap:14px;margin-top:22px}
+.field{flex:1;background:#faf8f2;border:1px solid #e6e1d5;border-radius:16px;padding:12px 16px;font-size:14px;display:flex;align-items:center;gap:10px;cursor:pointer}
+.field .k{color:#888}.field .v{flex:1;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.field .v.empty{color:#aaa}
+.cta{display:inline-flex;align-items:center;gap:14px;background:#111;color:#fff;border-radius:40px;padding:8px 26px 8px 8px;font-weight:700;font-size:18px}
+.cta:hover{background:#000}.cta:disabled{opacity:.45;cursor:default}
+.cta .dot{width:44px;height:44px;border-radius:50%;background:#f6c634;display:flex;align-items:center;justify-content:center;color:#111;font-size:15px}
+
+/* 상태 바 + 목록 */
+.status{padding:14px 20px;display:flex;gap:26px;font-size:13px;color:#555;align-items:center}
+.status b{color:#111}.status .err{color:#c33}.status .last{margin-left:auto;color:#666}
+.bar{height:6px;background:#efebe0;border-radius:6px;overflow:hidden;margin:0 0 12px}.bar div{height:100%;width:0;background:#f6c634;transition:width .2s}
+.list{flex:1;min-height:0;display:flex;flex-direction:column;padding:14px 18px}
+.list .head{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:13px;color:#666}
+.list .head .badge{display:inline-flex;gap:6px;background:#111;color:#fff;font-size:12px;border-radius:20px;padding:4px 10px}.badge b{color:#f6c634}
+.list .head button{margin-left:auto;font-size:13px;color:#555;padding:6px 10px;border-radius:10px}.list .head button:hover{background:#f1ede3}
+.rows{overflow:auto;flex:1}
+.row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;font-size:14px;cursor:pointer}
+.row:nth-child(odd){background:#f7f4ec}.row:hover{background:#f3edd8}.row.sel{outline:1.5px solid #111}
+.row .st{margin-left:auto;font-size:12px;color:#888;white-space:nowrap}.row .st.done{color:#1a9a4a;font-weight:600}.row .st.warn{color:#c80}.row .st.err{color:#c33}
+.row .star{color:#d9a900;font-size:12px}
+.empty{color:#999;font-size:13px;padding:24px;text-align:center}
+
+/* 개별 설정 / 로그 패널 */
+.panel{position:fixed;inset:0;background:rgba(30,25,20,.35);display:none;align-items:center;justify-content:center}
+.panel.show{display:flex}
+.panel .box{background:#fffdf8;border-radius:22px;padding:22px 24px;width:520px;max-width:92vw;max-height:85vh;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.panel h3{margin:0;font-size:17px}.panel p{margin:0;font-size:13px;color:#666}
+.panel .acts{display:flex;gap:8px;justify-content:flex-end}
+.btn{border-radius:30px;padding:9px 18px;font-size:14px;border:1.5px solid #ddd;background:#faf8f2}.btn:hover{background:#f1ede3}.btn.dark{background:#111;color:#fff;border-color:#111}
+pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;font-size:12px;line-height:1.5;overflow:auto;max-height:55vh;white-space:pre-wrap;user-select:text}
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111;color:#fff;border-radius:30px;padding:10px 20px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}.toast.show{opacity:1}
+</style></head>
+<body>
+<header>
+ <div class="logo">PDF<br>Redact<small>dororok AI Lab</small></div>
+ <div class="pills">
+  <button class="pill" onclick="openDst()">📂 저장된 폴더 열기</button>
+  <button class="pill" onclick="showLog()">📋 로그</button>
+  <button class="pill" id="ocrBtn" onclick="toggleOcr()">🔍 스캔 OCR <span class="n">켬</span></button>
+ </div>
+</header>
+
+<section class="card">
+ <div class="drop" id="drop" tabindex="0" onclick="pickFiles()">
+  <span class="ic">📥</span>
+  <span class="t">PDF 파일이나 폴더를 여기에 놓으세요</span>
+  <span class="sub">또는 클릭해서 파일 선택 · <a href="#" onclick="event.stopPropagation();pickFolder();return false" style="color:#333">폴더 선택</a> · 현재 <b id="cnt">0</b>개</span>
+ </div>
+ <div class="chips" id="chips"><span class="lbl">삭제:</span></div>
+ <div class="bottom">
+  <div class="field" onclick="pickDst()"><span class="k">저장 →</span><span class="v empty" id="dst">저장 폴더를 정하세요</span><span>📂</span></div>
+  <button class="cta" id="run" onclick="run()"><span class="dot">▶</span>삭제 실행</button>
+ </div>
+</section>
+
+<section class="card list">
+ <div class="head"><span class="badge">파일 <b id="cnt2">0</b></span><span class="badge" id="ovBadge" style="display:none">★ 개별설정 <b id="ovCnt">0</b></span>
+  <span style="margin-left:8px">파일을 클릭하면 그 파일만 삭제 항목을 다르게 정할 수 있어요</span>
+  <button onclick="clearAll()">목록 비우기</button></div>
+ <div class="bar"><div id="bar"></div></div>
+ <div class="rows" id="rows"><div class="empty">아직 파일이 없습니다. 위에 끌어다 놓거나 클릭해서 추가하세요.</div></div>
+</section>
+
+<section class="card status" id="status">
+ <span>✔ 완료 <b id="sDone">0</b></span><span>⏳ 대기 <b id="sWait">0</b></span><span class="err">⚠ 확인 필요 <b id="sWarn">0</b></span><span class="last" id="sLast"></span>
+</section>
+
+<div class="panel" id="filePanel"><div class="box">
+ <h3 id="fpTitle">파일 개별 설정</h3><p>이 파일에만 적용됩니다. 전체 기본값과 다르면 ★ 표시가 붙습니다.</p>
+ <div class="chips" id="fpChips" style="margin:0"></div>
+ <div class="acts"><button class="btn" onclick="fpReset()">기본값으로</button><button class="btn" onclick="fpRemove()">목록에서 제거</button><button class="btn dark" onclick="fpSave()">적용</button></div>
+</div></div>
+
+<div class="panel" id="logPanel" onclick="if(event.target===this)this.classList.remove('show')"><div class="box">
+ <h3>로그</h3><pre id="logBody">(아직 없음)</pre>
+ <div class="acts"><button class="btn dark" onclick="document.getElementById('logPanel').classList.remove('show')">닫기</button></div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+let CATS={}, global=new Set(), files=[], dstPath="", ocr=true, running=false, sel=null, fpSet=null, logs=[];
+const $=id=>document.getElementById(id);
+const api=()=>window.pywebview.api;
+
+window.addEventListener('pywebviewready', async()=>{
+  const c=await api().categories(); CATS=c.all; global=new Set(c.default); renderChips();
+});
+// 브라우저에서 화면만 볼 때(pywebview 없음) 기본 항목으로 표시
+setTimeout(()=>{ if(!Object.keys(CATS).length){
+  CATS={name:"성명",rrn:"주민등록번호",birth:"생년월일",phone:"전화번호",email:"이메일",address:"주소",photo:"사진",class_no:"반/번호",reg_no:"대장번호",school:"학교명",footer:"출력정보(IP)"};
+  global=new Set(["name","rrn","birth","phone","email","address","photo","footer"]); renderChips(); }},800);
+
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2200)}
+function chipHtml(k,on){return `<button class="chip ${on?'on':''}" data-k="${k}"><i></i>${CATS[k]}</button>`}
+function renderChips(){
+  const box=$('chips'); box.innerHTML='<span class="lbl">삭제:</span>'+Object.keys(CATS).map(k=>chipHtml(k,global.has(k))).join('');
+  box.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{const k=b.dataset.k; global.has(k)?global.delete(k):global.add(k); renderChips(); renderRows();});
+}
+function catsFor(f){return f.override?f.override:global}
+function isOverride(f){if(!f.override)return false; const a=[...f.override].sort().join(),b=[...global].sort().join(); return a!==b}
+
+async function addItems(items){
+  let n=0; for(const it of items){ if(!files.some(f=>f.path===it.path)){files.push({...it,status:'wait'});n++} }
+  if(files.length&&!dstPath){dstPath=await api().default_dst(files[0].path); renderDst()}
+  renderRows(); toast(`PDF ${n}개 추가`);
+}
+async function pickFiles(){addItems(await api().pick_files())}
+async function pickFolder(){addItems(await api().pick_folder())}
+async function pickDst(){const d=await api().pick_dst(); if(d){dstPath=d;renderDst()}}
+function renderDst(){const e=$('dst'); e.textContent=dstPath||'저장 폴더를 정하세요'; e.classList.toggle('empty',!dstPath)}
+async function openDst(){ if(!(await api().open_folder(dstPath))) toast('아직 저장된 폴더가 없습니다') }
+function toggleOcr(){ocr=!ocr; $('ocrBtn').querySelector('.n').textContent=ocr?'켬':'끔'}
+function clearAll(){ if(running)return; files=[]; renderRows() }
+
+// 드래그 앤 드롭 (pywebview가 파일의 전체 경로를 pywebviewFullPath 로 넣어줌)
+const drop=$('drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
+drop.addEventListener('drop',async e=>{
+  const paths=[...e.dataTransfer.files].map(f=>f.pywebviewFullPath||f.path).filter(Boolean);
+  if(!paths.length){toast('경로를 읽지 못했습니다. 클릭해서 선택해 주세요');return}
+  addItems(await api().expand(paths));
+});
+
+function renderRows(){
+  $('cnt').textContent=$('cnt2').textContent=files.length;
+  const ov=files.filter(isOverride).length; $('ovBadge').style.display=ov?'':'none'; $('ovCnt').textContent=ov;
+  const r=$('rows');
+  if(!files.length){r.innerHTML='<div class="empty">아직 파일이 없습니다. 위에 끌어다 놓거나 클릭해서 추가하세요.</div>'}
+  else r.innerHTML=files.map((f,i)=>{
+    const st={wait:['대기',''],done:[`✔ ${f.hits}곳`,'done'],warn:[`⚠ ${f.hits}곳 · 텍스트 없음`,'warn'],err:['✖ 오류','err']}[f.status];
+    return `<div class="row ${sel===i?'sel':''}" onclick="openFile(${i})">📄 ${f.name} ${isOverride(f)?'<span class="star">★</span>':''}<span class="st ${st[1]}">${st[0]}</span></div>`}).join('');
+  $('sDone').textContent=files.filter(f=>f.status==='done').length;
+  $('sWait').textContent=files.filter(f=>f.status==='wait').length;
+  $('sWarn').textContent=files.filter(f=>f.status==='warn'||f.status==='err').length;
+}
+
+// 개별 설정
+function openFile(i){ if(running)return; sel=i; fpSet=new Set(catsFor(files[i])); $('fpTitle').textContent=files[i].name; renderFp(); $('filePanel').classList.add('show'); renderRows() }
+function renderFp(){const b=$('fpChips'); b.innerHTML=Object.keys(CATS).map(k=>chipHtml(k,fpSet.has(k))).join('');
+  b.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{const k=c.dataset.k; fpSet.has(k)?fpSet.delete(k):fpSet.add(k); renderFp()})}
+function closeFp(){$('filePanel').classList.remove('show'); sel=null; renderRows()}
+function fpSave(){files[sel].override=new Set(fpSet); closeFp()}
+function fpReset(){files[sel].override=null; closeFp()}
+function fpRemove(){files.splice(sel,1); closeFp()}
+
+// 실행
+async function run(){
+  if(running)return;
+  const jobs=files.map(f=>({path:f.path,cats:[...catsFor(f)]}));
+  const r=await api().run(jobs,dstPath,ocr);
+  if(!r.ok){toast(r.msg);return}
+  running=true; $('run').disabled=true; files.forEach(f=>f.status='wait'); $('bar').style.width='0'; renderRows();
+}
+function onFileDone(d){const f=files.find(x=>x.path===d.path); if(f){f.hits=d.hits; f.status=d.error?'err':d.warn?'warn':'done'}
+  $('bar').style.width=(d.n/d.total*100)+'%'; $('sLast').textContent=`최근: ${f?f.name:''} · ${d.hits}곳 삭제`; renderRows()}
+function onAllDone(d){running=false; $('run').disabled=false; toast('완료 — 저장된 폴더 열기로 확인하세요')}
+function onLog(s){logs.push(s); if($('logPanel').classList.contains('show'))$('logBody').textContent=logs.join('\n')}
+function showLog(){$('logBody').textContent=logs.length?logs.join('\n'):'(아직 없음)'; $('logPanel').classList.add('show')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('filePanel').classList.remove('show');$('logPanel').classList.remove('show');sel=null;renderRows()}});
+</script>
+</body></html>
