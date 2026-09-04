@@ -1,6 +1,23 @@
 """PDF 개인정보 삭제 앱 — 웹 화면(pywebview) + 파이썬 엔진"""
 import os, sys, json, threading, subprocess, traceback
-import webview
+
+def _crash(msg):
+    """창 없는 exe에서 오류가 나면 파일로 남기고 알림창을 띄움"""
+    try:
+        d = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
+        p = os.path.join(d, "오류기록.txt")
+        with open(p, "a", encoding="utf-8") as fp:
+            fp.write("=" * 60 + "\n" + msg + "\n")
+    except Exception:
+        p = "(기록 실패)"
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, f"앱을 시작할 수 없습니다.\n\n{msg[-1500:]}\n\n기록: {p}", "PDF 개인 정보 제거기", 0x10)
+
+try:
+    import webview
+except Exception:
+    _crash(traceback.format_exc()); sys.exit(1)
 
 if getattr(sys, "frozen", False):
     BASE = sys._MEIPASS
@@ -118,7 +135,10 @@ class Api:
 
 
 if __name__ == "__main__":
-    api = Api()
-    api.win = webview.create_window("PDF개인정보삭제기", UI, js_api=api, width=1060, height=720,
-                                    min_size=(900, 620), background_color="#f3efe6")
-    webview.start(debug=False)
+    try:
+        api = Api()
+        api.win = webview.create_window("PDF 개인 정보 제거기", UI, js_api=api, width=1060, height=720,
+                                        min_size=(900, 620), background_color="#f3efe6")
+        webview.start(debug=False)
+    except Exception:
+        _crash(traceback.format_exc()); sys.exit(1)
