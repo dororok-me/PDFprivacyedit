@@ -99,7 +99,8 @@ class Api:
         report, used = {}, set()
         for n, j in enumerate(jobs, 1):
             path, cats = j["path"], set(j["cats"])
-            f = os.path.basename(path)
+            stem0, ext0 = os.path.splitext(os.path.basename(path))
+            f = f"{stem0}_삭제본{ext0}"          # 원본과 구별되는 파일명
             if f in used:
                 stem, ext = os.path.splitext(f); k = 2
                 while f"{stem}({k}){ext}" in used: k += 1
