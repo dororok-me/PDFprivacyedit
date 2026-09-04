@@ -29,11 +29,19 @@ from engine import redact_file, CATEGORIES, DEFAULT_ON
 UI = os.path.join(BASE, "ui", "index.html")
 
 
+# pywebview 6는 js_api 객체의 공개 속성(밑줄 없는 이름)을 모두 재귀적으로 훑어 JS 스텁을 만든다.
+# 창 객체(win)를 공개 속성으로 두면 win.native(.NET Form) 아래 수천 개 속성을 비UI 스레드에서 건드려
+# 창이 "응답 없음"이 되므로, 창·상태는 반드시 밑줄(_) 이름으로 둔다.
+_FD = getattr(webview, "FileDialog", None)
+OPEN_DIALOG = _FD.OPEN if _FD else webview.OPEN_DIALOG
+FOLDER_DIALOG = _FD.FOLDER if _FD else webview.FOLDER_DIALOG
+
+
 class Api:
     def __init__(self):
-        self.win = None
-        self.running = False
-        self.logs = []
+        self._win = None
+        self._running = False
+        self._logs = []
 
     # ---------------- 상태 ----------------
     def categories(self):
@@ -41,16 +49,16 @@ class Api:
 
     # ---------------- 파일 선택 ----------------
     def pick_files(self):
-        r = self.win.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
+        r = self._win.create_file_dialog(OPEN_DIALOG, allow_multiple=True,
                                         file_types=("PDF 파일 (*.pdf)",))
         return self.expand(list(r or []))
 
     def pick_folder(self):
-        r = self.win.create_file_dialog(webview.FOLDER_DIALOG)
+        r = self._win.create_file_dialog(FOLDER_DIALOG)
         return self.expand(list(r or []))
 
     def pick_dst(self):
-        r = self.win.create_file_dialog(webview.FOLDER_DIALOG)
+        r = self._win.create_file_dialog(FOLDER_DIALOG)
         return (r or [None])[0]
 
     def expand(self, paths):
@@ -74,7 +82,7 @@ class Api:
     # ---------------- 실행 ----------------
     def run(self, jobs, dst, ocr):
         """jobs: [{path, cats:[...]}]"""
-        if self.running:
+        if self._running:
             return {"ok": False, "msg": "이미 실행 중입니다."}
         if not jobs:
             return {"ok": False, "msg": "PDF 파일을 먼저 추가하세요."}
@@ -84,15 +92,15 @@ class Api:
         if any(os.path.dirname(j["path"]) == dst for j in jobs):
             return {"ok": False, "msg": "원본이 있는 폴더를 저장 폴더로 쓸 수 없습니다."}
         os.makedirs(dst, exist_ok=True)
-        self.running = True
+        self._running = True
         threading.Thread(target=self._work, args=(jobs, dst, ocr), daemon=True).start()
         return {"ok": True}
 
     def _emit(self, fn, payload):
-        self.win.evaluate_js(f"{fn}({json.dumps(payload, ensure_ascii=False)})")
+        self._win.evaluate_js(f"{fn}({json.dumps(payload, ensure_ascii=False)})")
 
     def _log(self, s):
-        self.logs.append(s)
+        self._logs.append(s)
         self._emit("onLog", s)
 
     def _work(self, jobs, dst, ocr):
@@ -125,14 +133,14 @@ class Api:
                 self._log(f"[{n}/{len(jobs)}] {f} ✖ 오류\n{traceback.format_exc()}")
         with open(os.path.join(dst, "_report.json"), "w", encoding="utf-8") as fp:
             json.dump(report, fp, ensure_ascii=False, indent=1)
-        self.running = False
+        self._running = False
         self._log(f"완료. 저장 위치: {dst}")
         self._emit("onAllDone", {"dst": dst})
 
     # ---------------- 드래그 앤 드롭 (파이썬 쪽 리스너로만 전체 경로를 받을 수 있음) ----------------
     def attach_drop(self):
         try:
-            el = self.win.dom.get_element("#drop")
+            el = self._win.dom.get_element("#drop")
             el.events.drop += self._on_drop
         except Exception:
             self._log("드롭 리스너 등록 실패\n" + traceback.format_exc())
@@ -153,15 +161,15 @@ class Api:
         return True
 
     def get_logs(self):
-        return self.logs
+        return list(self._logs)
 
 
 if __name__ == "__main__":
     try:
         api = Api()
-        api.win = webview.create_window("PDF 개인 정보 제거기", UI, js_api=api, width=1060, height=720,
+        api._win = webview.create_window("PDF 개인 정보 제거기", UI, js_api=api, width=1060, height=720,
                                         min_size=(900, 620), background_color="#f3efe6")
-        api.win.events.loaded += api.attach_drop
+        api._win.events.loaded += api.attach_drop
         webview.start(debug=False)
     except Exception:
         _crash(traceback.format_exc()); sys.exit(1)
