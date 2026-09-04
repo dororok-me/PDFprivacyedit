@@ -111,7 +111,14 @@ class Api:
                              "hits": [h.as_dict() for h in hits]}
                 warn = any(v == "none" for v in sources.values())
                 self._emit("onFileDone", {"path": path, "hits": len(hits), "warn": warn, "n": n, "total": len(jobs)})
-                self._log(f"[{n}/{len(jobs)}] {f} → {len(hits)}곳 삭제" + ("  ⚠ 텍스트 없음(OCR 실패)" if warn else ""))
+                src = {"text": 0, "ocr": 0, "none": 0}
+                for v in sources.values(): src[v] = src.get(v, 0) + 1
+                bycat = {}
+                for h in hits: bycat[CATEGORIES[h.category]] = bycat.get(CATEGORIES[h.category], 0) + 1
+                detail = ", ".join(f"{k} {v}" for k, v in bycat.items()) or "탐지 없음"
+                self._log(f"[{n}/{len(jobs)}] {f} → {len(hits)}곳 삭제 ({detail})  "
+                          f"페이지: 텍스트 {src['text']}, OCR {src['ocr']}, 없음 {src['none']}  항목: {','.join(sorted(cats))}"
+                          + ("  ⚠ 텍스트 없음(OCR 실패)" if warn else ""))
             except Exception:
                 self._emit("onFileDone", {"path": path, "hits": 0, "error": True, "n": n, "total": len(jobs)})
                 self._log(f"[{n}/{len(jobs)}] {f} ✖ 오류\n{traceback.format_exc()}")
@@ -120,6 +127,20 @@ class Api:
         self.running = False
         self._log(f"완료. 저장 위치: {dst}")
         self._emit("onAllDone", {"dst": dst})
+
+    # ---------------- 드래그 앤 드롭 (파이썬 쪽 리스너로만 전체 경로를 받을 수 있음) ----------------
+    def attach_drop(self):
+        try:
+            el = self.win.dom.get_element("#drop")
+            el.events.drop += self._on_drop
+        except Exception:
+            self._log("드롭 리스너 등록 실패\n" + traceback.format_exc())
+
+    def _on_drop(self, e):
+        files = (e.get("dataTransfer") or {}).get("files") or []
+        paths = [f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")]
+        items = self.expand(paths)
+        self._emit("onDropped", {"items": items, "raw": len(files)})
 
     # ---------------- 기타 ----------------
     def open_folder(self, d):
@@ -139,6 +160,7 @@ if __name__ == "__main__":
         api = Api()
         api.win = webview.create_window("PDF 개인 정보 제거기", UI, js_api=api, width=1060, height=720,
                                         min_size=(900, 620), background_color="#f3efe6")
+        api.win.events.loaded += api.attach_drop
         webview.start(debug=False)
     except Exception:
         _crash(traceback.format_exc()); sys.exit(1)
