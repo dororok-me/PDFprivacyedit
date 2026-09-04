@@ -60,16 +60,13 @@ header{display:flex;align-items:center}
 .panel .acts{display:flex;gap:8px;justify-content:flex-end}
 .btn{border-radius:30px;padding:9px 18px;font-size:14px;border:1.5px solid #ddd;background:#faf8f2}.btn:hover{background:#f1ede3}.btn.dark{background:#111;color:#fff;border-color:#111}
 pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;font-size:12px;line-height:1.5;overflow:auto;max-height:55vh;white-space:pre-wrap;user-select:text}
+.lnk{font-size:12px;color:#888;text-decoration:underline;padding:0 0 0 12px}.lnk:hover{color:#111}
+.cta.done{background:#1a9a4a}.cta.done .dot{background:#fff}
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#111;color:#fff;border-radius:30px;padding:10px 20px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s}.toast.show{opacity:1}
 </style></head>
 <body>
 <header>
  <div class="logo">PDF 개인 정보<br>제거기<small>by 강동욱</small></div>
- <div class="pills">
-  <button class="pill" onclick="openDst()">📂 저장된 폴더 열기</button>
-  <button class="pill" onclick="showLog()">📋 로그</button>
-  <button class="pill" id="ocrBtn" onclick="toggleOcr()" title="스캔(이미지) PDF에서 글자를 읽어내는 기능. 텍스트가 없는 페이지에서만 자동 사용">🔍 스캔 PDF 글자 인식 <span class="n">켬</span></button>
- </div>
 </header>
 
 <section class="card">
@@ -81,7 +78,8 @@ pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;fo
  <div class="chips" id="chips"><span class="lbl">삭제할 항목:</span></div>
  <div class="bottom">
   <div class="field" onclick="pickDst()"><span class="k">저장 →</span><span class="v empty" id="dst">저장 폴더를 정하세요</span><span>📂</span></div>
-  <button class="cta" id="run" onclick="run()"><span class="dot">▶</span>삭제 실행</button>
+  <button class="btn" id="openBtn" onclick="openDst()" style="padding:14px 20px;white-space:nowrap">📂 저장된 폴더 열기</button>
+  <button class="cta" id="run" onclick="run()"><span class="dot" id="runDot">▶</span><span id="runTxt">삭제 실행</span></button>
  </div>
 </section>
 
@@ -94,7 +92,7 @@ pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;fo
 </section>
 
 <section class="card status" id="status">
- <span>✔ 완료 <b id="sDone">0</b></span><span>⏳ 대기 <b id="sWait">0</b></span><span class="err">⚠ 확인 필요 <b id="sWarn">0</b></span><span class="last" id="sLast"></span>
+ <span>✔ 완료 <b id="sDone">0</b></span><span>⏳ 대기 <b id="sWait">0</b></span><span class="err">⚠ 확인 필요 <b id="sWarn">0</b></span><span class="last" id="sLast"></span><button class="lnk" onclick="showLog()">로그 보기</button>
 </section>
 
 <div class="panel" id="filePanel"><div class="box">
@@ -131,8 +129,10 @@ function renderChips(){
 function catsFor(f){return f.override?f.override:global}
 function isOverride(f){if(!f.override)return false; const a=[...f.override].sort().join(),b=[...global].sort().join(); return a!==b}
 
+let doneState=false;
+function setRun(done){ doneState=done; $('run').classList.toggle('done',done); $('runTxt').textContent=done?'작업 완료':'삭제 실행'; $('runDot').textContent=done?'✔':'▶' }
 async function addItems(items){
-  let n=0; for(const it of items){ if(!files.some(f=>f.path===it.path)){files.push({...it,status:'wait'});n++} }
+  let n=0; if(doneState) setRun(false); for(const it of items){ if(!files.some(f=>f.path===it.path)){files.push({...it,status:'wait'});n++} }
   if(files.length&&!dstPath){dstPath=await api().default_dst(files[0].path); renderDst()}
   renderRows(); toast(`PDF ${n}개 추가`);
 }
@@ -142,17 +142,14 @@ async function pickDst(){const d=await api().pick_dst(); if(d){dstPath=d;renderD
 function renderDst(){const e=$('dst'); e.textContent=dstPath||'저장 폴더를 정하세요'; e.classList.toggle('empty',!dstPath)}
 async function openDst(){ if(!(await api().open_folder(dstPath))) toast('아직 저장된 폴더가 없습니다') }
 function toggleOcr(){ocr=!ocr; $('ocrBtn').querySelector('.n').textContent=ocr?'켬':'끔'}
-function clearAll(){ if(running)return; files=[]; renderRows() }
+function clearAll(){ if(running)return; files=[]; setRun(false); renderRows() }
 
 // 드래그 앤 드롭 (pywebview가 파일의 전체 경로를 pywebviewFullPath 로 넣어줌)
 const drop=$('drop');
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
-drop.addEventListener('drop',async e=>{
-  const paths=[...e.dataTransfer.files].map(f=>f.pywebviewFullPath||f.path).filter(Boolean);
-  if(!paths.length){toast('경로를 읽지 못했습니다. 클릭해서 선택해 주세요');return}
-  addItems(await api().expand(paths));
-});
+// 실제 경로는 파이썬 쪽 드롭 리스너가 받아서 onDropped 로 넘겨줌
+function onDropped(d){ if(!d.items.length){toast(d.raw?'PDF 파일이나 폴더만 놓을 수 있어요':'경로를 읽지 못했습니다. 클릭해서 선택해 주세요');return} addItems(d.items) }
 
 function renderRows(){
   $('cnt').textContent=$('cnt2').textContent=files.length;
@@ -179,6 +176,7 @@ function fpRemove(){files.splice(sel,1); closeFp()}
 // 실행
 async function run(){
   if(running)return;
+  if(doneState){toast('이미 완료된 작업이에요. 새 파일을 추가하면 다시 실행할 수 있어요');return}
   const jobs=files.map(f=>({path:f.path,cats:[...catsFor(f)]}));
   const r=await api().run(jobs,dstPath,ocr);
   if(!r.ok){toast(r.msg);return}
@@ -186,7 +184,7 @@ async function run(){
 }
 function onFileDone(d){const f=files.find(x=>x.path===d.path); if(f){f.hits=d.hits; f.status=d.error?'err':d.warn?'warn':'done'}
   $('bar').style.width=(d.n/d.total*100)+'%'; $('sLast').textContent=`최근: ${f?f.name:''} · ${d.hits}곳 삭제`; renderRows()}
-function onAllDone(d){running=false; $('run').disabled=false; toast('완료 — 저장된 폴더 열기로 확인하세요')}
+function onAllDone(d){running=false; $('run').disabled=false; setRun(true); toast('완료 — 저장된 폴더 열기로 확인하세요')}
 function onLog(s){logs.push(s); if($('logPanel').classList.contains('show'))$('logBody').textContent=logs.join('\n')}
 function showLog(){$('logBody').textContent=logs.length?logs.join('\n'):'(아직 없음)'; $('logPanel').classList.add('show')}
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('filePanel').classList.remove('show');$('logPanel').classList.remove('show');sel=null;renderRows()}});
