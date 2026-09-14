@@ -13,9 +13,10 @@
 
 ## exe / 맥 앱 받기 (GitHub Actions)
 1. 이 폴더를 GitHub 저장소(main 브랜치)에 push
-2. 저장소 → Actions 탭 → "build" 실행 완료 후 Artifacts 에서 다운로드
-   - PDF개인정보삭제기-windows : exe 하나 (Tesseract 한국어 OCR 포함, 설치 불필요)
-   - PDF개인정보삭제기-mac : .app (OCR은 `brew install tesseract tesseract-lang` 필요)
+2. 빌드가 끝나면 저장소 → Releases 에 "빌드 #번호"로 올라옵니다 (Actions 탭 Artifacts 에도 3일간 보관)
+   - PDF개인정보삭제기.exe : 윈도우용 exe 하나 (Tesseract 한국어 OCR 포함, 설치 불필요)
+   - PDF개인정보삭제기-mac.zip : 맥용 .app (OCR은 `brew install tesseract tesseract-lang` 필요)
+   - main 이 아닌 브랜치에서 수동 실행한 빌드는 "Pre-release"로 표시됩니다
 3. 윈도우 첫 실행 시 SmartScreen 경고 → "추가 정보" → "실행". 맥은 우클릭 → 열기.
 
 ## 파이썬으로 바로 실행 (테스트용)
