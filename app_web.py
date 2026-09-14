@@ -1,5 +1,5 @@
 """PDF 개인정보 삭제 앱 — 웹 화면(pywebview) + 파이썬 엔진"""
-import os, sys, json, threading, subprocess, traceback
+import os, re, sys, json, threading, subprocess, traceback
 
 def _crash(msg):
     """창 없는 exe에서 오류가 나면 파일로 남기고 알림창을 띄움"""
@@ -28,6 +28,26 @@ from engine import redact_file, CATEGORIES, DEFAULT_ON
 
 UI = os.path.join(BASE, "ui", "index.html")
 
+# 저장 파일명 규칙. {이름}=원본 파일 이름(확장자 제외), {번호}=목록 순번(001, 002, …)
+DEFAULT_NAME = "{이름}_삭제본"
+_BAD_CHARS = re.compile(r'[\\/:*?"<>|\r\n\t]')
+
+
+def clean_pattern(pattern):
+    pattern = _BAD_CHARS.sub("", (pattern or "").strip())
+    if not pattern:
+        pattern = DEFAULT_NAME
+    if "{이름}" not in pattern and "{번호}" not in pattern:   # 규칙에 변하는 부분이 없으면 순번을 붙여 겹치지 않게
+        pattern += "_{번호}"
+    return pattern
+
+
+def make_name(pattern, path, n, total):
+    stem, ext = os.path.splitext(os.path.basename(path))
+    width = max(3, len(str(total)))
+    name = pattern.replace("{이름}", stem).replace("{번호}", str(n).zfill(width))
+    return name + (ext if ext.lower() == ".pdf" else ".pdf")
+
 
 # pywebview 6는 js_api 객체의 공개 속성(밑줄 없는 이름)을 모두 재귀적으로 훑어 JS 스텁을 만든다.
 # 창 객체(win)를 공개 속성으로 두면 win.native(.NET Form) 아래 수천 개 속성을 비UI 스레드에서 건드려
@@ -45,7 +65,7 @@ class Api:
 
     # ---------------- 상태 ----------------
     def categories(self):
-        return {"all": CATEGORIES, "default": sorted(DEFAULT_ON)}
+        return {"all": CATEGORIES, "default": sorted(DEFAULT_ON), "name_pattern": DEFAULT_NAME}
 
     # ---------------- 파일 선택 ----------------
     def pick_files(self):
@@ -54,25 +74,48 @@ class Api:
         return self.expand(list(r or []))
 
     def pick_folder(self):
+        """폴더 하나를 고르면 그 폴더 바로 안의 PDF만 (하위 폴더 제외). {folder, items} 반환"""
         r = self._win.create_file_dialog(FOLDER_DIALOG)
-        return self.expand(list(r or []))
+        self._log(f"폴더 선택 대화상자 결과: {r!r}")
+        folder = self._one_path(r)
+        if not folder or not os.path.isdir(folder):
+            return {"folder": None, "items": []}
+        items = self.expand([folder])
+        self._log(f"폴더 '{folder}' 안의 PDF {len(items)}개")
+        return {"folder": folder, "items": items}
 
     def pick_dst(self):
         r = self._win.create_file_dialog(FOLDER_DIALOG)
-        return (r or [None])[0]
+        return self._one_path(r)
+
+    @staticmethod
+    def _one_path(r):
+        """대화상자 결과(튜플/리스트/문자열/None)에서 경로 하나만 안전하게 꺼낸다"""
+        if not r:
+            return None
+        if isinstance(r, str):
+            return r
+        return r[0] if len(r) else None
 
     def expand(self, paths):
-        """폴더는 안의 PDF로 풀고, 파일은 그대로. [{path, name}] 반환"""
+        """폴더는 그 폴더 바로 안의 PDF로 풀고(하위 폴더는 안 봄), 파일은 그대로. [{path, name, dir}] 반환"""
         out = []
+        if isinstance(paths, str):          # 문자열 하나가 오면 글자 단위로 쪼개지지 않게
+            paths = [paths]
         for p in paths:
+            if not isinstance(p, str):
+                continue
             p = p.strip("{}")
             if os.path.isdir(p):
-                cands = [os.path.join(p, f) for f in sorted(os.listdir(p)) if f.lower().endswith(".pdf")]
+                cands = [os.path.join(p, f) for f in sorted(os.listdir(p))
+                         if f.lower().endswith(".pdf") and os.path.isfile(os.path.join(p, f))]
             elif p.lower().endswith(".pdf") and os.path.isfile(p):
                 cands = [p]
             else:
                 continue
-            out += [{"path": os.path.abspath(c), "name": os.path.basename(c)} for c in cands]
+            for c in cands:
+                c = os.path.abspath(c)
+                out.append({"path": c, "name": os.path.basename(c), "dir": os.path.dirname(c)})
         return out
 
     def default_dst(self, first_path):
@@ -80,20 +123,26 @@ class Api:
         return os.path.join(os.path.dirname(base), os.path.basename(base) + "_삭제본")
 
     # ---------------- 실행 ----------------
-    def run(self, jobs, dst, ocr):
-        """jobs: [{path, cats:[...]}]"""
+    def run(self, jobs, dst, ocr, name_pattern=DEFAULT_NAME):
+        """jobs: [{path, cats:[...]}], name_pattern: 저장 파일명 규칙 ({이름}=원본 이름, {번호}=순번)"""
         if self._running:
             return {"ok": False, "msg": "이미 실행 중입니다."}
         if not jobs:
             return {"ok": False, "msg": "PDF 파일을 먼저 추가하세요."}
         if not dst:
             return {"ok": False, "msg": "저장 폴더를 정하세요."}
+        missing = [j["path"] for j in jobs if not os.path.isfile(j["path"])]
+        if missing:
+            return {"ok": False, "msg": f"찾을 수 없는 파일이 있습니다: {os.path.basename(missing[0])}"}
         dst = os.path.abspath(dst)
         if any(os.path.dirname(j["path"]) == dst for j in jobs):
             return {"ok": False, "msg": "원본이 있는 폴더를 저장 폴더로 쓸 수 없습니다."}
+        name_pattern = clean_pattern(name_pattern)
         os.makedirs(dst, exist_ok=True)
+        dirs = sorted({os.path.dirname(j["path"]) for j in jobs})
+        self._log(f"실행: 파일 {len(jobs)}개 (원본 폴더 {len(dirs)}곳: {'; '.join(dirs)}) → {dst}  파일명 규칙: {name_pattern}")
         self._running = True
-        threading.Thread(target=self._work, args=(jobs, dst, ocr), daemon=True).start()
+        threading.Thread(target=self._work, args=(jobs, dst, ocr, name_pattern), daemon=True).start()
         return {"ok": True}
 
     def _emit(self, fn, payload):
@@ -103,12 +152,11 @@ class Api:
         self._logs.append(s)
         self._emit("onLog", s)
 
-    def _work(self, jobs, dst, ocr):
+    def _work(self, jobs, dst, ocr, name_pattern=DEFAULT_NAME):
         report, used = {}, set()
         for n, j in enumerate(jobs, 1):
             path, cats = j["path"], set(j["cats"])
-            stem0, ext0 = os.path.splitext(os.path.basename(path))
-            f = f"{stem0}_삭제본{ext0}"          # 원본과 구별되는 파일명
+            f = make_name(name_pattern, path, n, len(jobs))
             if f in used:
                 stem, ext = os.path.splitext(f); k = 2
                 while f"{stem}({k}){ext}" in used: k += 1
@@ -148,6 +196,7 @@ class Api:
     def _on_drop(self, e):
         files = (e.get("dataTransfer") or {}).get("files") or []
         paths = [f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")]
+        self._log(f"드롭된 경로: {paths!r}")
         items = self.expand(paths)
         self._emit("onDropped", {"items": items, "raw": len(files)})
 

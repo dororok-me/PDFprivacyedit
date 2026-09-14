@@ -19,12 +19,13 @@ CATEGORIES = {
     "email":    "이메일",
     "address":  "주소",
     "photo":    "사진",
+    "enroll":   "학적사항(입학·졸업 학교)",
     "class_no": "반/번호",
     "reg_no":   "졸업(학적) 대장 번호",
     "school":   "학교명",
     "footer":   "출력정보(IP/출력자)",
 }
-DEFAULT_ON = {"name", "rrn", "birth", "phone", "email", "address", "photo", "footer"}
+DEFAULT_ON = {"name", "rrn", "birth", "phone", "email", "address", "photo", "enroll", "class_no", "footer"}
 
 # 라벨 → 카테고리. 라벨 바로 오른쪽(같은 줄) 값을 지운다.
 INLINE_LABELS = {
@@ -45,15 +46,25 @@ INLINE_LABELS = {
 COLUMN_LABELS = {"담임성명": "name", "성명": "name", "이름": "name", "보호자": "name",
                  "학과": None, "반": "class_no", "번호": "class_no"}
 
+# 학적사항 칸: 라벨 오른쪽 칸(여러 줄)의 입학·졸업 기록을 통째로 지운다.
+ENROLL_LABELS = {"학적사항", "학적"}
+
 # 값 추출을 멈추는 단어(다음 라벨). 라벨 사전의 키 + 몇 가지 구조 단어.
-STOP_WORDS = set(INLINE_LABELS) | {"성별", "학년", "구분", "학기", "졸업", "입학", "특기사항"}
+STOP_WORDS = set(INLINE_LABELS) | ENROLL_LABELS | {"성별", "학년", "구분", "학기", "졸업", "입학", "특기사항"}
 
 # 정규식 — 띄어쓰기/하이픈이 섞여도 잡히도록 공백 제거 후 매칭
 REGEX = {
     "rrn":   re.compile(r"\d{6}-?[1-8]\d{6}"),
     "phone": re.compile(r"(01[016789]|0[2-6]\d?)-?\d{3,4}-?\d{4}"),
     "email": re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"),
+    # 본문 속 학년-반 표기: "(1-5맨손체조", "2-6반", "2학년 5반"  (횟수·기간 "1-2회" 등은 제외)
+    "class_no": re.compile(r"(?<![\d.])[1-6]-\d{1,2}(?=반)"
+                           r"|(?<=\()[1-6]-\d{1,2}(?=[가-힣A-Za-z])(?![회주월일번시명개차])"
+                           r"|[1-6]학년\d{1,2}반"),
 }
+# ○○초등학교 / ○○중학교 / ○○고등학교 — 단어 하나 안에서 찾는다 (앞에 이름이 붙어 있어야 함)
+SCHOOL_RE = re.compile(r"[가-힣]{1,12}(?:초등학교|중학교|고등학교)$")
+SCHOOL_WORD = {"초등학교", "중학교", "고등학교"}
 IP_RE = re.compile(r"\d{1,3}\.\d{1,3}\.[\d*]{1,3}[. ][\d*]{1,3}")
 
 
@@ -138,6 +149,30 @@ def find_cell(page, cx, cy, max_size=300):
     return r if r.width < max_size and r.height < max_size else None
 
 
+def tight_rect(page, ws, text, source):
+    """정규식이 잡은 문자열이 단어 하나의 일부일 때, 그 글자들만의 박스로 좁힌다 (텍스트 PDF만)"""
+    box = union(ws)
+    if source != "text" or len(ws) != 1 or ws[0][4].replace(" ", "") == text:
+        return box
+    try:
+        found = [r for r in page.search_for(text, clip=box + (-1, -1, 1, 1)) if r.intersects(box)]
+    except Exception:
+        found = []
+    return union([(r.x0, r.y0, r.x1, r.y1) for r in found]) if found else box
+
+
+def enroll_values(page, words, label):
+    """'학적사항' 라벨 오른쪽 칸(여러 줄)에 있는 단어들. 선이 없으면(스캔본) 라벨 높이 ±14pt 오른쪽 단어."""
+    cell = find_cell(page, (label[0] + label[2]) / 2, (label[1] + label[3]) / 2)
+    right = find_cell(page, cell.x1 + 3, (cell.y0 + cell.y1) / 2, max_size=600) if cell else None
+    if right:
+        return [v for v in words if pymupdf.Rect(v[:4]).intersects(right)
+                and (v[0] + v[2]) / 2 > right.x0 and _norm(v[4]) not in ENROLL_LABELS]
+    y0, y1 = label[1] - 14, label[3] + 14
+    return [v for v in words if v[0] > label[2] and v[3] > y0 and v[1] < y1
+            and _norm(v[4]) not in ENROLL_LABELS]
+
+
 # ---------------------------------------------------------------------------
 # 탐지
 # ---------------------------------------------------------------------------
@@ -161,7 +196,29 @@ def detect_page(page, enabled, ocr=True):
                 continue
             for m in rx.finditer(joined):
                 idxs = sorted(set(owner[m.start():m.end()]))
-                hits.append(Hit(pno, union([ws[i] for i in idxs]), cat, m.group(), source))
+                sel = [ws[i] for i in idxs]
+                hits.append(Hit(pno, tight_rect(page, sel, m.group(), source), cat, m.group(), source))
+
+    # 1-a) 학교 이름 (○○중학교 등) — 단어 단위. "해운대 중학교"처럼 띄어 쓴 경우 앞 단어까지 묶는다
+    if "school" in enabled:
+        for ln in lines:
+            ws = ln["words"]
+            for i, w in enumerate(ws):
+                t = w[4].replace(" ", "")
+                if SCHOOL_RE.search(t):
+                    hits.append(Hit(pno, tight_rect(page, [w], SCHOOL_RE.search(t).group(), source),
+                                    "school", t, source))
+                elif t in SCHOOL_WORD and i > 0 and re.fullmatch(r"[가-힣]{2,12}", ws[i - 1][4]) \
+                        and w[0] - ws[i - 1][2] < 8:
+                    hits.append(Hit(pno, union(ws[i - 1:i + 1]), "school", ws[i - 1][4] + " " + t, source))
+
+    # 1-c) 학적사항 칸 (입학·졸업 학교 기록 전체)
+    if "enroll" in enabled:
+        for w in words:
+            if _norm(w[4]) in ENROLL_LABELS:
+                vals = enroll_values(page, words, w)
+                if vals:
+                    hits.append(Hit(pno, union(vals), "enroll", " ".join(v[4] for v in vals), source))
 
     # 1-b) 출력 정보 줄 (학교명/날짜/IP/담임이름)
     if "footer" in enabled:
@@ -171,6 +228,7 @@ def detect_page(page, enabled, ocr=True):
                 hits.append(Hit(pno, union(ln["words"]), "footer", txt, source))
 
     # 2) 라벨 기반 (같은 줄 오른쪽 값)
+    multi_label_words = set()      # "졸업 대장 번호"처럼 여러 단어로 된 라벨에 쓰인 단어 (id)
     for ln in lines:
         ws = ln["words"]
         i = 0
@@ -185,8 +243,10 @@ def detect_page(page, enabled, ocr=True):
                 if cand in INLINE_LABELS:
                     key, span_used = cand, span
                     break
+            if key is not None and span_used > 1:
+                multi_label_words.update(id(w) for w in ws[i:i + span_used])
             if key is None or INLINE_LABELS[key] not in enabled:
-                i += 1
+                i += span_used if key else 1
                 continue
             cat = INLINE_LABELS[key]
             j = i + span_used
@@ -211,6 +271,8 @@ def detect_page(page, enabled, ocr=True):
     # 3) 표 머리글 아래 세로 열 (담임성명 등) — 라벨 아래 150pt 안, 같은 x 범위
     for w in words:
         key = _norm(w[4])
+        if id(w) in multi_label_words:      # "졸업 대장 번호"의 "번호" → 학년 열을 지우지 않도록
+            continue
         if key in COLUMN_LABELS and COLUMN_LABELS[key] in enabled:
             # 같은 줄 오른쪽 60pt 안에 값이 있으면 인라인 라벨 → 세로열 규칙 제외
             right = [v for v in words if v is not w and abs((v[1]+v[3])/2 - (w[1]+w[3])/2) < 3
@@ -218,11 +280,18 @@ def detect_page(page, enabled, ocr=True):
             if right:
                 continue
             x0, x1 = w[0] - 20, w[2] + 20
-            col = [v for v in words
-                   if v[1] > w[3] + 2 and v[1] < w[3] + 150
-                   and v[0] < x1 and v[2] > x0
-                   and _norm(v[4]) not in STOP_WORDS and not re.fullmatch(r"[\d.]+", v[4])]
-            for v in col:
+            numeric_ok = COLUMN_LABELS[key] == "class_no"      # 반/번호 열은 값이 숫자
+            cands = sorted((v for v in words
+                            if v[1] > w[3] + 2 and v[1] < w[3] + 150 and v[0] < x1 and v[2] > x0),
+                           key=lambda v: v[1])
+            last_y = w[3]
+            for v in cands:
+                t = _norm(v[4])
+                if t in STOP_WORDS or v[1] - last_y > 30:     # 다음 라벨을 만나거나 표를 벗어나면 끝
+                    break
+                last_y = v[3]
+                if t == "" or re.fullmatch(r"\.+", v[4]) or (not numeric_ok and re.fullmatch(r"[\d.]+", v[4])):
+                    continue
                 hits.append(Hit(pno, v[:4], COLUMN_LABELS[key], v[4], source))
 
     # 4) 사진 — "사진" 글자를 둘러싼 칸(선 4개)을 찾아 지우고, 페이지 내 모든 이미지도 지움
