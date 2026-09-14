@@ -34,14 +34,17 @@ jobs:
           name: PDF개인정보삭제기-windows
           path: dist/PDF개인정보삭제기.exe
           retention-days: 3
+      # Release 는 파일 이름의 한글을 지우므로 영문 이름으로 올린다 (받은 뒤 이름은 자유롭게 바꿔도 됨)
+      - run: copy dist\PDF개인정보삭제기.exe dist\PDFprivacyedit-windows.exe
+        shell: cmd
       - name: Release 에 올리기
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: "빌드 #${{ github.run_number }} (${{ github.ref_name }})"
-          body: "브랜치 ${{ github.ref_name }} · 커밋 ${{ github.sha }}"
+          body: "브랜치 ${{ github.ref_name }} · 커밋 ${{ github.sha }}\n\nPDFprivacyedit-windows.exe = 윈도우용 (PDF개인정보삭제기.exe), PDFprivacyedit-mac.zip = 맥용"
           prerelease: ${{ github.ref_name != 'main' }}
-          files: dist/PDF개인정보삭제기.exe
+          files: dist/PDFprivacyedit-windows.exe
 
   macos:
     runs-on: macos-latest
@@ -58,11 +61,12 @@ jobs:
           name: PDF개인정보삭제기-mac
           path: dist/PDF개인정보삭제기-mac.zip
           retention-days: 3
+      - run: cp "dist/PDF개인정보삭제기-mac.zip" dist/PDFprivacyedit-mac.zip
       - name: Release 에 올리기
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: "빌드 #${{ github.run_number }} (${{ github.ref_name }})"
-          body: "브랜치 ${{ github.ref_name }} · 커밋 ${{ github.sha }}"
+          body: "브랜치 ${{ github.ref_name }} · 커밋 ${{ github.sha }}\n\nPDFprivacyedit-windows.exe = 윈도우용 (PDF개인정보삭제기.exe), PDFprivacyedit-mac.zip = 맥용"
           prerelease: ${{ github.ref_name != 'main' }}
-          files: dist/PDF개인정보삭제기-mac.zip
+          files: dist/PDFprivacyedit-mac.zip
