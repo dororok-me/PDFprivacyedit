@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+오류기록.txt
