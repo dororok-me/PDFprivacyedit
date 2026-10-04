@@ -32,9 +32,11 @@ header{display:flex;align-items:center}
 .chip i{width:8px;height:8px;border-radius:50%;background:#bbb}.chip.on{border-color:#111}.chip.on i{background:#f6c634}
 .chip.ml{margin-left:auto}
 .bottom{display:flex;align-items:center;gap:14px;margin-top:22px}
-.field{flex:1;background:#faf8f2;border:1px solid #e6e1d5;border-radius:16px;padding:12px 16px;font-size:14px;display:flex;align-items:center;gap:10px;cursor:pointer}
-.field .k{color:#888}.field .v{flex:1;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.field .v.empty{color:#aaa}
-.cta{display:inline-flex;align-items:center;gap:14px;background:#111;color:#fff;border-radius:40px;padding:8px 26px 8px 8px;font-weight:700;font-size:18px}
+.field{flex:1;min-width:0;background:#faf8f2;border:1px solid #e6e1d5;border-radius:16px;padding:12px 16px;font-size:14px;display:flex;align-items:center;gap:10px;cursor:pointer}
+.field .k{color:#888;white-space:nowrap}.field .v{flex:1;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.field .v.empty{color:#aaa}
+.field.name{flex:0 0 240px;cursor:default}.field input{flex:1;min-width:0;border:0;background:transparent;font:inherit;color:#333;user-select:text;outline:none}
+.field .help{color:#aaa;font-size:12px;cursor:help}
+.cta{display:inline-flex;align-items:center;gap:14px;white-space:nowrap;background:#111;color:#fff;border-radius:40px;padding:8px 26px 8px 8px;font-weight:700;font-size:18px}
 .cta:hover{background:#000}.cta:disabled{opacity:.45;cursor:default}
 .cta .dot{width:44px;height:44px;border-radius:50%;background:#f6c634;display:flex;align-items:center;justify-content:center;color:#111;font-size:15px}
 
@@ -51,6 +53,7 @@ header{display:flex;align-items:center}
 .row:nth-child(odd){background:#f7f4ec}.row:hover{background:#f3edd8}.row.sel{outline:1.5px solid #111}
 .row .st{margin-left:auto;font-size:12px;color:#888;white-space:nowrap}.row .st.done{color:#1a9a4a;font-weight:600}.row .st.warn{color:#c80}.row .st.err{color:#c33}
 .row .star{color:#d9a900;font-size:12px}
+.row .dir{color:#999;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%;margin-left:6px}
 .empty{color:#999;font-size:13px;padding:24px;text-align:center}
 
 /* 개별 설정 / 로그 패널 */
@@ -68,7 +71,7 @@ pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;fo
 <body>
 <header>
  <img class="emblem" src="pf.png" alt="">
- <div class="logo">PDF 개인 정보<br>제거기<small>by 강동욱</small></div>
+ <div class="logo">PDF 개인 정보<br>제거기<small>© 부산외국어고등학교</small></div>
 </header>
 
 <section class="card">
@@ -80,6 +83,7 @@ pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;fo
  <div class="chips" id="chips"><span class="lbl">삭제할 항목:</span></div>
  <div class="bottom">
   <div class="field" onclick="pickDst()"><span class="k">저장 →</span><span class="v empty" id="dst">저장 폴더를 정하세요</span><span>📂</span></div>
+  <div class="field name" title="저장될 파일 이름 규칙&#10;{이름} = 원본 파일 이름 (확장자 제외)&#10;{번호} = 목록 순번 (001, 002, …)&#10;예) {이름}_삭제본 → 홍길동_삭제본.pdf&#10;예) 지원자{번호} → 지원자001.pdf"><span class="k">파일명</span><input id="namePat" value="{이름}_삭제본" spellcheck="false"><span class="help">ⓘ</span></div>
   <button class="btn" id="openBtn" onclick="openDst()" style="padding:14px 20px;white-space:nowrap">📂 저장된 폴더 열기</button>
   <button class="cta" id="run" onclick="run()"><span class="dot" id="runDot">▶</span><span id="runTxt">삭제 실행</span></button>
  </div>
@@ -115,12 +119,12 @@ const $=id=>document.getElementById(id);
 const api=()=>window.pywebview.api;
 
 window.addEventListener('pywebviewready', async()=>{
-  const c=await api().categories(); CATS=c.all; global=new Set(c.default); renderChips();
+  const c=await api().categories(); CATS=c.all; global=new Set(c.default); if(c.name_pattern)$('namePat').value=c.name_pattern; renderChips();
 });
 // 브라우저에서 화면만 볼 때(pywebview 없음) 기본 항목으로 표시
 setTimeout(()=>{ if(!Object.keys(CATS).length){
-  CATS={name:"성명",rrn:"주민등록번호",birth:"생년월일",phone:"전화번호",email:"이메일",address:"주소",photo:"사진",class_no:"반/번호",reg_no:"대장번호",school:"학교명",footer:"출력정보(IP)"};
-  global=new Set(["name","rrn","birth","phone","email","address","photo","footer"]); renderChips(); }},800);
+  CATS={name:"성명",rrn:"주민등록번호",birth:"생년월일",phone:"전화번호",email:"이메일",address:"주소",photo:"사진",enroll:"학적사항",class_no:"반/번호",reg_no:"대장번호",school:"학교명",footer:"출력정보(IP)"};
+  global=new Set(["name","rrn","birth","phone","email","address","photo","enroll","class_no","footer"]); renderChips(); }},800);
 
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2200)}
 function chipHtml(k,on){return `<button class="chip ${on?'on':''}" data-k="${k}"><i></i>${CATS[k]}</button>`}
@@ -133,13 +137,22 @@ function isOverride(f){if(!f.override)return false; const a=[...f.override].sort
 
 let doneState=false;
 function setRun(done){ doneState=done; $('run').classList.toggle('done',done); $('runTxt').textContent=done?'작업 완료':'삭제 실행'; $('runDot').textContent=done?'✔':'▶' }
-async function addItems(items){
+async function addItems(items,quiet){
   let n=0; if(doneState) setRun(false); for(const it of items){ if(!files.some(f=>f.path===it.path)){files.push({...it,status:'wait'});n++} }
   if(files.length&&!dstPath){dstPath=await api().default_dst(files[0].path); renderDst()}
-  renderRows(); toast(`PDF ${n}개 추가`);
+  renderRows(); if(!quiet) toast(`PDF ${n}개 추가`);
 }
 async function pickFiles(){addItems(await api().pick_files())}
-async function pickFolder(){addItems(await api().pick_folder())}
+async function pickFolder(){
+  const r=await api().pick_folder();
+  if(!r||!r.folder) return;                                   // 취소
+  if(!r.items.length){toast('이 폴더에는 PDF 파일이 없어요 (하위 폴더는 보지 않습니다)');return}
+  // 폴더 선택은 "그 폴더의 PDF만" — 이전에 넣어 둔 다른 폴더의 파일이 섞여 처리되지 않도록 목록을 교체
+  const had=files.length; files=[]; setRun(false);
+  if(!dstPath||had){dstPath=await api().default_dst(r.items[0].path); renderDst()}
+  await addItems(r.items,true);
+  toast(had?`목록을 비우고 이 폴더의 PDF ${r.items.length}개만 넣었어요`:`폴더의 PDF ${r.items.length}개 추가`);
+}
 async function pickDst(){const d=await api().pick_dst(); if(d){dstPath=d;renderDst()}}
 function renderDst(){const e=$('dst'); e.textContent=dstPath||'저장 폴더를 정하세요'; e.classList.toggle('empty',!dstPath)}
 async function openDst(){ if(!(await api().open_folder(dstPath))) toast('아직 저장된 폴더가 없습니다') }
@@ -160,7 +173,7 @@ function renderRows(){
   if(!files.length){r.innerHTML='<div class="empty">아직 파일이 없습니다. 위에 끌어다 놓거나 클릭해서 추가하세요.</div>'}
   else r.innerHTML=files.map((f,i)=>{
     const st={wait:['대기',''],done:[`✔ ${f.hits}곳`,'done'],warn:[`⚠ ${f.hits}곳 · 텍스트 없음`,'warn'],err:['✖ 오류','err']}[f.status];
-    return `<div class="row ${sel===i?'sel':''}" onclick="openFile(${i})">📄 ${f.name} ${isOverride(f)?'<span class="star">★</span>':''}<span class="st ${st[1]}">${st[0]}</span></div>`}).join('');
+    return `<div class="row ${sel===i?'sel':''}" onclick="openFile(${i})" title="${f.path}">📄 ${f.name} ${isOverride(f)?'<span class="star">★</span>':''}<span class="dir">${f.dir||''}</span><span class="st ${st[1]}">${st[0]}</span></div>`}).join('');
   $('sDone').textContent=files.filter(f=>f.status==='done').length;
   $('sWait').textContent=files.filter(f=>f.status==='wait').length;
   $('sWarn').textContent=files.filter(f=>f.status==='warn'||f.status==='err').length;
@@ -180,7 +193,7 @@ async function run(){
   if(running)return;
   if(doneState){toast('이미 완료된 작업이에요. 새 파일을 추가하면 다시 실행할 수 있어요');return}
   const jobs=files.map(f=>({path:f.path,cats:[...catsFor(f)]}));
-  const r=await api().run(jobs,dstPath,ocr);
+  const r=await api().run(jobs,dstPath,ocr,$('namePat').value);
   if(!r.ok){toast(r.msg);return}
   running=true; $('run').disabled=true; files.forEach(f=>f.status='wait'); $('bar').style.width='0'; renderRows();
 }
