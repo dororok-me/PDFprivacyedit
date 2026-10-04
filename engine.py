@@ -69,10 +69,11 @@ IP_RE = re.compile(r"\d{1,3}\.\d{1,3}\.[\d*]{1,3}[. ][\d*]{1,3}")
 
 
 class Hit:
-    """탐지된 영역 하나"""
-    def __init__(self, page_no, rect, category, text, source):
+    """탐지된 영역 하나. pad_x: 삭제 박스 가로 여백(글자 일부만 잡았을 때는 0 — 옆 글자 보호)"""
+    def __init__(self, page_no, rect, category, text, source, pad_x=None):
         self.page_no, self.rect, self.category, self.text, self.source = \
             page_no, pymupdf.Rect(rect), category, text, source
+        self.pad_x = pad_x
 
     def as_dict(self):
         r = self.rect
@@ -150,15 +151,28 @@ def find_cell(page, cx, cy, max_size=300):
 
 
 def tight_rect(page, ws, text, source):
-    """정규식이 잡은 문자열이 단어 하나의 일부일 때, 그 글자들만의 박스로 좁힌다 (텍스트 PDF만)"""
+    """정규식이 잡은 문자열이 단어 하나의 일부일 때, 그 글자들만의 박스로 좁힌다 (텍스트 PDF만).
+    반환: (박스, 좁혔는지 여부)"""
     box = union(ws)
     if source != "text" or len(ws) != 1 or ws[0][4].replace(" ", "") == text:
-        return box
+        return box, False
     try:
         found = [r for r in page.search_for(text, clip=box + (-1, -1, 1, 1)) if r.intersects(box)]
     except Exception:
         found = []
-    return union([(r.x0, r.y0, r.x1, r.y1) for r in found]) if found else box
+    if not found:
+        return box, False
+    return union([(r.x0, r.y0, r.x1, r.y1) for r in found]), True
+
+
+def tight_hit(page, pno, ws, text, cat, source):
+    rect, tight = tight_rect(page, ws, text, source)
+    return Hit(pno, rect, cat, text, source, pad_x=0 if tight else None)
+
+
+# 양식 라벨 판별: 본문 문장 속 "학교", "담임" 같은 낱말을 라벨로 오인하지 않기 위한 기준
+LABEL_GAP = 20          # 양식에서는 라벨이 앞 단어와 이만큼 이상 떨어져 있다 (본문 띄어쓰기는 최대 ~14pt)
+SCHOOL_VALUE_RE = re.compile(r"[가-힣A-Za-z·()]{1,15}(?:학교|초|중|고)")
 
 
 def enroll_values(page, words, label):
@@ -196,8 +210,7 @@ def detect_page(page, enabled, ocr=True):
                 continue
             for m in rx.finditer(joined):
                 idxs = sorted(set(owner[m.start():m.end()]))
-                sel = [ws[i] for i in idxs]
-                hits.append(Hit(pno, tight_rect(page, sel, m.group(), source), cat, m.group(), source))
+                hits.append(tight_hit(page, pno, [ws[i] for i in idxs], m.group(), cat, source))
 
     # 1-a) 학교 이름 (○○중학교 등) — 단어 단위. "해운대 중학교"처럼 띄어 쓴 경우 앞 단어까지 묶는다
     if "school" in enabled:
@@ -206,8 +219,7 @@ def detect_page(page, enabled, ocr=True):
             for i, w in enumerate(ws):
                 t = w[4].replace(" ", "")
                 if SCHOOL_RE.search(t):
-                    hits.append(Hit(pno, tight_rect(page, [w], SCHOOL_RE.search(t).group(), source),
-                                    "school", t, source))
+                    hits.append(tight_hit(page, pno, [w], SCHOOL_RE.search(t).group(), "school", source))
                 elif t in SCHOOL_WORD and i > 0 and re.fullmatch(r"[가-힣]{2,12}", ws[i - 1][4]) \
                         and w[0] - ws[i - 1][2] < 8:
                     hits.append(Hit(pno, union(ws[i - 1:i + 1]), "school", ws[i - 1][4] + " " + t, source))
@@ -250,6 +262,16 @@ def detect_page(page, enabled, ocr=True):
                 continue
             cat = INLINE_LABELS[key]
             j = i + span_used
+            raw_label = "".join(w[4] for w in ws[i:j]).strip()
+            has_colon = raw_label.endswith((":", "：")) or (j < len(ws) and ws[j][4].lstrip().startswith((":", "：")))
+            if len(key) <= 3 and not has_colon:
+                # "학교", "담임", "반" 같은 짧은 낱말은 본문 문장에도 흔하다.
+                # 줄 맨 앞이거나 앞 단어와 크게 떨어져 있고(양식 칸), 그 줄이 문장처럼 빽빽하지 않을 때만 라벨로 본다.
+                prev_gap = ws[i][0] - ws[i - 1][2] if i > 0 else LABEL_GAP
+                line_max_gap = max((ws[k][0] - ws[k - 1][2] for k in range(1, len(ws))), default=0)
+                if prev_gap < LABEL_GAP or not (len(ws) <= 5 or line_max_gap >= LABEL_GAP):
+                    i += span_used
+                    continue
             # 콜론만 있는 단어는 건너뜀
             while j < len(ws) and _norm(ws[j][4]) == "":
                 j += 1
@@ -264,9 +286,12 @@ def detect_page(page, enabled, ocr=True):
                     break
                 vals.append(ws[j])
                 j += 1
+            if vals and cat == "school" and not has_colon \
+                    and not SCHOOL_VALUE_RE.fullmatch(_norm("".join(v[4] for v in vals))):
+                vals = []            # "학교 폭력 예방…"처럼 뒤에 오는 말이 학교 이름이 아니면 라벨이 아님
             if vals:
                 hits.append(Hit(pno, union(vals), cat, " ".join(v[4] for v in vals), source))
-            i = j if vals else i + 1
+            i = j if vals else i + span_used
 
     # 3) 표 머리글 아래 세로 열 (담임성명 등) — 라벨 아래 150pt 안, 같은 x 범위
     for w in words:
@@ -328,7 +353,8 @@ def redact_file(src, dst, enabled=DEFAULT_ON, ocr=True, extra_rects=None, pad=1.
     for page in doc:
         hits, source = detect_page(page, enabled, ocr)
         sources[page.number] = source
-        rects = [h.rect + (-pad, -pad, pad, pad) for h in hits]
+        rects = [h.rect + (-(pad if h.pad_x is None else h.pad_x), -pad, (pad if h.pad_x is None else h.pad_x), pad)
+                 for h in hits]
         rects += [pymupdf.Rect(r) for r in (extra_rects or {}).get(page.number, [])]
         for r in rects:
             page.add_redact_annot(r & page.rect, fill=(0, 0, 0))
