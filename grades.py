@@ -220,7 +220,7 @@ def extract_to_xlsx(paths, out_path):
         for s in SEMS:
             for k in ("영", "국", "사"):
                 head.append(f"{g}-{s} {k}")
-    head += [n for n, _ in ATT_OUT] + ["미인정 합계"]
+    head += [n for n, _ in ATT_OUT] + ["환산 결석일수"]
     ws.append(head); det.append(head)
     results, errors = [], []
     for p in paths:
@@ -239,7 +239,8 @@ def extract_to_xlsx(paths, out_path):
                 row += [""] * (len(ATT_OUT) + 1); drow += ["출결표 못 찾음"] + [""] * len(ATT_OUT)
             else:
                 vals = [att[k] for _, k in ATT_OUT]
-                row += vals + [sum(vals)]
+                # 환산: 미인정결석 + (미인정 지각+조퇴+결과) ÷ 3 (나머지 버림)
+                row += vals + [vals[0] + (vals[1] + vals[2] + vals[3]) // 3]
                 drow += [f"질병{att[k[:2]+'질병']}/미인정{att[k]}/기타{att[k[:2]+'기타']}" for _, k in ATT_OUT] + [""]
             results.append((row, drow))
         except Exception as e:
