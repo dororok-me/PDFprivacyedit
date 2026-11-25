@@ -179,7 +179,7 @@ class Api:
         try:
             from grades import extract_to_xlsx
             out = os.path.join(dst, "성취도_추출.xlsx")
-            n, errors = extract_to_xlsx(paths, out)
+            n, errors, out = extract_to_xlsx(paths, out)
             for e in errors: self._log("성적 추출 오류: " + e)
             self._log(f"성적 추출 완료: {n}개 → {out}")
             self._emit("onGradesDone", {"ok": True, "n": n, "errors": len(errors), "out": out})

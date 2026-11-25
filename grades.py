@@ -146,6 +146,47 @@ def parse_pdf(path):
     return data, name
 
 
+ATT_COLS = ["결석질병", "결석미인정", "결석기타", "지각질병", "지각미인정", "지각기타",
+            "조퇴질병", "조퇴미인정", "조퇴기타", "결과질병", "결과미인정", "결과기타"]
+ATT_OUT = [("미인정결석", "결석미인정"), ("미인정지각", "지각미인정"), ("미인정조퇴", "조퇴미인정"), ("미인정결과", "결과미인정")]
+
+
+def parse_attendance(path):
+    """출결상황 표 → {항목: 전 학년 합계} (숫자 없는 칸은 0)"""
+    doc = pymupdf.open(path)
+    tot = {k: 0 for k in ATT_COLS}
+    found = False
+    for page in doc:
+        words = [w for w in page.get_text("words") if w[4].strip()]
+        anchors = [w for w in words if w[4].strip() == "수업일수"]
+        if not anchors:
+            continue
+        hdr = anchors[0]
+        rows = _words_by_rows([w for w in words if w[1] > hdr[3] + 5])
+        for r in rows:
+            first = r["w"][0][4].strip()
+            if not re.fullmatch(r"[1-6]", first):
+                if r["cy"] > hdr[3] + 15 and found: break   # 표 끝
+                continue
+            xs = _vlines(page, r["cy"] - 2, r["cy"] + 2)
+            cells = list(zip(xs, xs[1:]))
+            cells = [c for c in cells if c[1] - c[0] > 3]
+            hc = (hdr[0] + hdr[2]) / 2
+            idx = next((i for i, c in enumerate(cells) if c[0] <= hc < c[1]), None)
+            if idx is None or len(cells) < idx + 13:
+                continue
+            data_cells = cells[idx + 1: idx + 13]
+            found = True
+            for k, (a, b) in zip(ATT_COLS, data_cells):
+                txt = "".join(w[4] for w in r["w"] if a <= (w[0] + w[2]) / 2 < b)
+                m = re.search(r"\d+", txt)
+                if m: tot[k] += int(m.group())
+        if found:
+            break
+    doc.close()
+    return tot if found else None
+
+
 def pick(rows, key):
     """교과 목록에서 국/영/사 성취도 고르기 → (과목, 성취도) or ("", "")"""
     if key == "국":
@@ -179,6 +220,7 @@ def extract_to_xlsx(paths, out_path):
         for s in SEMS:
             for k in ("영", "국", "사"):
                 head.append(f"{g}-{s} {k}")
+    head += [n for n, _ in ATT_OUT] + ["미인정 합계"]
     ws.append(head); det.append(head)
     results, errors = [], []
     for p in paths:
@@ -192,6 +234,13 @@ def extract_to_xlsx(paths, out_path):
                     for k in ("영", "국", "사"):
                         course, ach = pick(rows, k)
                         row.append(ach); drow.append(course)
+            att = parse_attendance(p)
+            if att is None:
+                row += [""] * (len(ATT_OUT) + 1); drow += ["출결표 못 찾음"] + [""] * len(ATT_OUT)
+            else:
+                vals = [att[k] for _, k in ATT_OUT]
+                row += vals + [sum(vals)]
+                drow += [f"질병{att[k[:2]+'질병']}/미인정{att[k]}/기타{att[k[:2]+'기타']}" for _, k in ATT_OUT] + [""]
             results.append((row, drow))
         except Exception as e:
             errors.append(f"{os.path.basename(p)}: {e}")
@@ -203,5 +252,11 @@ def extract_to_xlsx(paths, out_path):
             c.font = Font(bold=True); c.fill = PatternFill("solid", fgColor="FFF2CC"); c.alignment = Alignment(horizontal="center")
         sh.column_dimensions["B"].width = 28; sh.column_dimensions["C"].width = 10
         sh.freeze_panes = "D2"
-    wb.save(out_path)
-    return len(results), errors
+    try:
+        wb.save(out_path)
+    except PermissionError:                      # 엑셀에서 열어 둔 경우 → 시간 붙여 새 이름으로
+        import datetime
+        stem, ext = os.path.splitext(out_path)
+        out_path = f"{stem}_{datetime.datetime.now():%H%M%S}{ext}"
+        wb.save(out_path)
+    return len(results), errors, out_path
