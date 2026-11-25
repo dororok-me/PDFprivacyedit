@@ -27,30 +27,62 @@ def _words_by_rows(words, tol=3.0):
     return rows
 
 
-def _find_header(words):
-    """머리글(학기/교과/과목/성취도) 위치 → 열 경계. 없으면 None"""
-    cols = {}
-    for w in words:
-        t = w[4].strip()
-        if t.startswith("원점수"): t = "원점수"
-        if t in ("학기", "교과", "과목", "학점수", "원점수", "성취도", "석차등급") and t not in cols:
-            cols[t] = w
-    if not all(k in cols for k in ("학기", "교과", "과목", "성취도")):
+HEADER_ORDER = ["학기", "교과", "과목", "학점수", "원점수", "성취도", "석차등급", "비고"]
+KNOWN_SUBJ = ["사회(역사포함)/도덕", "사회(역사/도덕포함)", "사회(역사/도덕 포함)", "기술·가정/정보", "기술가정/정보",
+              "예술(음악/미술)", "예술(음악)", "예술(미술)", "국어", "영어", "수학", "과학", "사회", "역사", "도덕",
+              "체육", "음악", "미술", "정보", "한문", "선택", "교양"]
+
+
+def _vlines(page, y0, y1):
+    """y0~y1 구간을 지나는 세로 괘선 x 좌표 (표 칸 경계)"""
+    xs = set()
+    for d in page.get_drawings():
+        for it in d["items"]:
+            if it[0] == "l" and abs(it[1].x - it[2].x) < 1:
+                ya, yb = sorted((it[1].y, it[2].y))
+                if ya <= y0 and yb >= y1: xs.add(round(it[1].x))
+            elif it[0] == "re":
+                r = it[1]
+                if r.y0 <= y0 and r.y1 >= y1:
+                    xs.add(round(r.x0)); xs.add(round(r.x1))
+    return sorted(xs)
+
+
+def _find_header(words, page=None):
+    """머리글 행 → (머리글 y, {열이름: (x0, x1)}). 열 구성이 양식마다 달라서 있는 열만 써서 경계를 만든다."""
+    cols, present = None, None
+    for anchor in [w for w in words if w[4].strip() == "학기"]:
+        y = (anchor[1] + anchor[3]) / 2
+        line = [w for w in words if abs((w[1] + w[3]) / 2 - y) < 6]
+        c = {}
+        for w in line:
+            t = w[4].strip()
+            for k in HEADER_ORDER:
+                if t.startswith(k) and len(t) <= len(k) + 8 and k not in c:
+                    c[k] = w; break
+        if all(k in c for k in ("학기", "교과", "과목", "성취도")):
+            cols = c; present = [k for k in HEADER_ORDER if k in c]; break
+    if cols is None:
         return None
-    y = cols["학기"][3]
-    def cx(k): return (cols[k][0] + cols[k][2]) / 2
-    # 각 열의 좌우 경계 = 이웃 열 중심과의 중간
-    order = ["학기", "교과", "과목", "성취도"]
-    mids = [cx(k) for k in order]
+    centers = [(cols[k][0] + cols[k][2]) / 2 for k in present]
     edges = {}
-    edges["학기"] = (0, (mids[0] + mids[1]) / 2)
-    edges["교과"] = ((mids[0] + mids[1]) / 2, (mids[1] + mids[2]) / 2)
-    nxt = cx("학점수") if "학점수" in cols else (cx("원점수") if "원점수" in cols else cx("성취도") - 80)
-    edges["과목"] = ((mids[1] + mids[2]) / 2, (mids[2] + nxt) / 2)
-    left = cx("원점수") if "원점수" in cols else (cx("학점수") if "학점수" in cols else cx("성취도") - 60)
-    right = cx("석차등급") if "석차등급" in cols else cx("성취도") + 40
-    edges["성취도"] = ((left + cx("성취도")) / 2, (cx("성취도") + right) / 2)
-    return y, edges
+    # 1순위: 표 세로 괘선으로 칸 경계 결정
+    if page is not None:
+        xs = _vlines(page, cols["학기"][1] + 1, cols["학기"][3] - 1)
+        if len(xs) >= len(present) + 1:
+            for k, c in zip(present, centers):
+                for a, b in zip(xs, xs[1:]):
+                    if a <= c < b:
+                        edges[k] = (a, b); break
+            if len(edges) == len(present):
+                return cols["학기"][3], edges
+            edges = {}
+    # 2순위: 머리글 중심점 사이의 중간값
+    for i, k in enumerate(present):
+        left = 0 if i == 0 else (centers[i - 1] + centers[i]) / 2
+        right = 10000 if i == len(present) - 1 else (centers[i] + centers[i + 1]) / 2
+        edges[k] = (left, right)
+    return cols["학기"][3], edges
 
 
 def _col(edges, w):
@@ -59,6 +91,14 @@ def _col(edges, w):
         if a <= cx < b:
             return k
     return None
+
+
+def _split_subj(text):
+    """교과와 과목이 한 단어로 붙은 경우 분리 ("사회(역사포함)/도덕사회" → ("사회(역사포함)/도덕", "사회"))"""
+    for k in sorted(KNOWN_SUBJ, key=len, reverse=True):
+        if text.startswith(k) and len(text) > len(k):
+            return k, text[len(k):]
+    return text, ""
 
 
 def parse_pdf(path):
@@ -74,7 +114,7 @@ def parse_pdf(path):
         text = page.get_text()
         if "교과학습발달상황" not in text and grade is None:
             continue
-        hdr = _find_header(words)
+        hdr = _find_header(words, page)
         rows = _words_by_rows(words)
         for r in rows:
             line = " ".join(w[4] for w in r["w"])
@@ -90,13 +130,16 @@ def parse_pdf(path):
             cells = {"학기": [], "교과": [], "과목": [], "성취도": []}
             for w in r["w"]:
                 c = _col(edges, w)
-                if c: cells[c].append(w[4])
+                if c in cells: cells[c].append(w[4])
             s = "".join(cells["학기"])
             if s in ("1", "2"): sem = int(s)
-            if cells["교과"]: subj = "".join(cells["교과"])
+            course = " ".join(cells["과목"]).strip()
+            if cells["교과"]:
+                subj = "".join(cells["교과"])
+                if not course:
+                    subj, course = _split_subj(subj)
             ach = "".join(cells["성취도"]).replace(" ", "")
             am = ACH_RE.match(ach)
-            course = " ".join(cells["과목"]).strip()
             if am and sem and subj and course:
                 data.setdefault((grade, sem), []).append((subj, course, am.group(1)))
     doc.close()
