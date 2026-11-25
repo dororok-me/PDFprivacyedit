@@ -2,7 +2,11 @@ name: build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   windows:
@@ -27,6 +31,12 @@ jobs:
         with:
           name: PDF개인정보삭제기-windows
           path: dist/PDF개인정보삭제기.exe
+      - run: Compress-Archive -Path dist/PDF개인정보삭제기.exe -DestinationPath dist/PDF개인정보삭제기-windows.zip
+        shell: pwsh
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/PDF개인정보삭제기-windows.zip
 
   macos:
     runs-on: macos-latest
@@ -41,3 +51,7 @@ jobs:
         with:
           name: PDF개인정보삭제기-mac
           path: dist/PDF개인정보삭제기-mac.zip
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/PDF개인정보삭제기-mac.zip
