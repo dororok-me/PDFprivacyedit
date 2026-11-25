@@ -110,7 +110,11 @@ def parse_pdf(path):
         words = [w for w in page.get_text("words") if w[4].strip()]
         if not name:
             m = re.search(r"성명\s*[:：]\s*(\S+)", page.get_text())
-            if m: name = m.group(1)
+            if m:
+                cand = m.group(1).strip(":：")
+                # 성명 칸이 비어 있으면 다음 라벨(성별 등)이 잡히므로 제외
+                if cand and cand not in ("성별", "주민등록번호", "주소", "학적사항", "생년월일") and not cand.startswith("성별"):
+                    name = cand
         text = page.get_text()
         if "교과학습발달상황" not in text and grade is None:
             continue
