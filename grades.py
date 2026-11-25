@@ -134,7 +134,7 @@ def extract_to_xlsx(paths, out_path):
     head = ["접수번호", "파일명", "성명"]
     for g in GRADES:
         for s in SEMS:
-            for k in ("국", "영", "사"):
+            for k in ("영", "국", "사"):
                 head.append(f"{g}-{s} {k}")
     ws.append(head); det.append(head)
     results, errors = [], []
@@ -146,7 +146,7 @@ def extract_to_xlsx(paths, out_path):
             for g in GRADES:
                 for s in SEMS:
                     rows = data.get((g, s), [])
-                    for k in ("국", "영", "사"):
+                    for k in ("영", "국", "사"):
                         course, ach = pick(rows, k)
                         row.append(ach); drow.append(course)
             results.append((row, drow))
