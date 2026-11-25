@@ -3,3 +3,4 @@ pytesseract
 pillow
 tkinterdnd2
 pywebview
+openpyxl

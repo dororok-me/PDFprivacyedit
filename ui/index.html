@@ -80,6 +80,7 @@ pre{margin:0;background:#1d1b17;color:#e9e4d6;border-radius:14px;padding:14px;fo
  <div class="chips" id="chips"><span class="lbl">삭제할 항목:</span></div>
  <div class="bottom">
   <div class="field" onclick="pickDst()"><span class="k">저장 →</span><span class="v empty" id="dst">저장 폴더를 정하세요</span><span>📂</span></div>
+  <button class="btn" id="gradesBtn" onclick="extractGrades()" style="padding:14px 20px;white-space:nowrap" title="2·3학년 1·2학기 국·영·사 성취도(A~E)를 엑셀로">📊 성적 추출</button>
   <button class="btn" id="openBtn" onclick="openDst()" style="padding:14px 20px;white-space:nowrap">📂 저장된 폴더 열기</button>
   <button class="cta" id="run" onclick="run()"><span class="dot" id="runDot">▶</span><span id="runTxt">삭제 실행</span></button>
  </div>
@@ -186,6 +187,14 @@ async function run(){
 }
 function onFileDone(d){const f=files.find(x=>x.path===d.path); if(f){f.hits=d.hits; f.status=d.error?'err':d.warn?'warn':'done'}
   $('bar').style.width=(d.n/d.total*100)+'%'; $('sLast').textContent=`최근: ${f?f.name:''} · ${d.hits}곳 삭제`; renderRows()}
+async function extractGrades(){
+  if(running)return;
+  const r=await api().extract_grades(files.map(f=>f.path),dstPath);
+  if(!r.ok){toast(r.msg);return}
+  running=true; $('gradesBtn').disabled=true; $('gradesBtn').textContent='⏳ 추출 중…';
+}
+function onGradesDone(d){running=false; $('gradesBtn').disabled=false; $('gradesBtn').textContent='📊 성적 추출';
+  toast(d.ok?`성취도_추출.xlsx 저장 완료 (${d.n}명${d.errors?', 오류 '+d.errors:''})`:'성적 추출 실패 — 로그를 확인하세요')}
 function onAllDone(d){running=false; $('run').disabled=false; setRun(true); toast('완료 — 저장된 폴더 열기로 확인하세요')}
 function onLog(s){logs.push(s); if($('logPanel').classList.contains('show'))$('logBody').textContent=logs.join('\n')}
 function showLog(){$('logBody').textContent=logs.length?logs.join('\n'):'(아직 없음)'; $('logPanel').classList.add('show')}

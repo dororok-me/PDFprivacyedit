@@ -29,36 +29,47 @@ from engine import redact_file, CATEGORIES, DEFAULT_ON
 UI = os.path.join(BASE, "ui", "index.html")
 
 
-# pywebview 6는 js_api 객체의 공개 속성(밑줄 없는 이름)을 모두 재귀적으로 훑어 JS 스텁을 만든다.
-# 창 객체(win)를 공개 속성으로 두면 win.native(.NET Form) 아래 수천 개 속성을 비UI 스레드에서 건드려
-# 창이 "응답 없음"이 되므로, 창·상태는 반드시 밑줄(_) 이름으로 둔다.
-_FD = getattr(webview, "FileDialog", None)
-OPEN_DIALOG = _FD.OPEN if _FD else webview.OPEN_DIALOG
-FOLDER_DIALOG = _FD.FOLDER if _FD else webview.FOLDER_DIALOG
-
-
 class Api:
     def __init__(self):
-        self._win = None
-        self._running = False
-        self._logs = []
+        self.win = None
+        self.running = False
+        self.logs = []
 
     # ---------------- 상태 ----------------
     def categories(self):
         return {"all": CATEGORIES, "default": sorted(DEFAULT_ON)}
 
     # ---------------- 파일 선택 ----------------
+    def _dialog(self, *args, **kw):
+        """파일 선택 창은 반드시 화면(UI) 스레드에서 열어야 함.
+        윈도우에서 다른 스레드에서 열면 본 창이 '응답 없음'이 되고 선택 창이 뒤로 숨는다."""
+        fn = lambda: self.win.create_file_dialog(*args, **kw)
+        if sys.platform == "win32":
+            try:
+                form = self.win.native
+                if form is not None and form.InvokeRequired:
+                    from System import Func, Type
+                    box = {}
+                    def _run():
+                        try: box["v"] = fn()
+                        except Exception: box["e"] = traceback.format_exc()
+                    form.Invoke(Func[Type](_run))
+                    if "e" in box: self._log("파일 선택 창 오류\n" + box["e"])
+                    return box.get("v")
+            except Exception:
+                self._log("UI 스레드 호출 실패, 직접 실행\n" + traceback.format_exc())
+        return fn()
+
     def pick_files(self):
-        r = self._win.create_file_dialog(OPEN_DIALOG, allow_multiple=True,
-                                        file_types=("PDF 파일 (*.pdf)",))
+        r = self._dialog(webview.OPEN_DIALOG, allow_multiple=True, file_types=("PDF 파일 (*.pdf)",))
         return self.expand(list(r or []))
 
     def pick_folder(self):
-        r = self._win.create_file_dialog(FOLDER_DIALOG)
+        r = self._dialog(webview.FOLDER_DIALOG)
         return self.expand(list(r or []))
 
     def pick_dst(self):
-        r = self._win.create_file_dialog(FOLDER_DIALOG)
+        r = self._dialog(webview.FOLDER_DIALOG)
         return (r or [None])[0]
 
     def expand(self, paths):
@@ -82,7 +93,7 @@ class Api:
     # ---------------- 실행 ----------------
     def run(self, jobs, dst, ocr):
         """jobs: [{path, cats:[...]}]"""
-        if self._running:
+        if self.running:
             return {"ok": False, "msg": "이미 실행 중입니다."}
         if not jobs:
             return {"ok": False, "msg": "PDF 파일을 먼저 추가하세요."}
@@ -92,15 +103,15 @@ class Api:
         if any(os.path.dirname(j["path"]) == dst for j in jobs):
             return {"ok": False, "msg": "원본이 있는 폴더를 저장 폴더로 쓸 수 없습니다."}
         os.makedirs(dst, exist_ok=True)
-        self._running = True
+        self.running = True
         threading.Thread(target=self._work, args=(jobs, dst, ocr), daemon=True).start()
         return {"ok": True}
 
     def _emit(self, fn, payload):
-        self._win.evaluate_js(f"{fn}({json.dumps(payload, ensure_ascii=False)})")
+        self.win.evaluate_js(f"{fn}({json.dumps(payload, ensure_ascii=False)})")
 
     def _log(self, s):
-        self._logs.append(s)
+        self.logs.append(s)
         self._emit("onLog", s)
 
     def _work(self, jobs, dst, ocr):
@@ -133,14 +144,14 @@ class Api:
                 self._log(f"[{n}/{len(jobs)}] {f} ✖ 오류\n{traceback.format_exc()}")
         with open(os.path.join(dst, "_report.json"), "w", encoding="utf-8") as fp:
             json.dump(report, fp, ensure_ascii=False, indent=1)
-        self._running = False
+        self.running = False
         self._log(f"완료. 저장 위치: {dst}")
         self._emit("onAllDone", {"dst": dst})
 
     # ---------------- 드래그 앤 드롭 (파이썬 쪽 리스너로만 전체 경로를 받을 수 있음) ----------------
     def attach_drop(self):
         try:
-            el = self._win.dom.get_element("#drop")
+            el = self.win.dom.get_element("#drop")
             el.events.drop += self._on_drop
         except Exception:
             self._log("드롭 리스너 등록 실패\n" + traceback.format_exc())
@@ -150,6 +161,33 @@ class Api:
         paths = [f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")]
         items = self.expand(paths)
         self._emit("onDropped", {"items": items, "raw": len(files)})
+
+    # ---------------- 성적 추출 ----------------
+    def extract_grades(self, paths, dst):
+        if self.running:
+            return {"ok": False, "msg": "이미 실행 중입니다."}
+        if not paths:
+            return {"ok": False, "msg": "PDF 파일을 먼저 추가하세요."}
+        if not dst:
+            return {"ok": False, "msg": "저장 폴더를 정하세요."}
+        os.makedirs(dst, exist_ok=True)
+        self.running = True
+        threading.Thread(target=self._grades_work, args=(paths, dst), daemon=True).start()
+        return {"ok": True}
+
+    def _grades_work(self, paths, dst):
+        try:
+            from grades import extract_to_xlsx
+            out = os.path.join(dst, "성취도_추출.xlsx")
+            n, errors = extract_to_xlsx(paths, out)
+            for e in errors: self._log("성적 추출 오류: " + e)
+            self._log(f"성적 추출 완료: {n}개 → {out}")
+            self._emit("onGradesDone", {"ok": True, "n": n, "errors": len(errors), "out": out})
+        except Exception:
+            self._log("성적 추출 실패\n" + traceback.format_exc())
+            self._emit("onGradesDone", {"ok": False})
+        finally:
+            self.running = False
 
     # ---------------- 기타 ----------------
     def open_folder(self, d):
@@ -161,15 +199,15 @@ class Api:
         return True
 
     def get_logs(self):
-        return list(self._logs)
+        return self.logs
 
 
 if __name__ == "__main__":
     try:
         api = Api()
-        api._win = webview.create_window("PDF 개인 정보 제거기", UI, js_api=api, width=1060, height=720,
+        api.win = webview.create_window("PDF 개인 정보 제거기", UI, js_api=api, width=1060, height=720,
                                         min_size=(900, 620), background_color="#f3efe6")
-        api._win.events.loaded += api.attach_drop
+        api.win.events.loaded += api.attach_drop
         webview.start(debug=False)
     except Exception:
         _crash(traceback.format_exc()); sys.exit(1)
